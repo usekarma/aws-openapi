@@ -1,0 +1,51 @@
+openapi: 3.0.3
+info:
+  title: Demo API
+  version: 1.0.0
+  description: A simple demo API with basic endpoints for testing.
+
+paths:
+  /status:
+    get:
+      summary: Health check
+      x-lambda-nickname: status
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              example:
+                status: ok
+                version: 1.0.0
+
+  /echo:
+    post:
+      summary: Echo the posted JSON back
+      x-lambda-nickname: echo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Echoed input
+          content:
+            application/json:
+              example:
+                input:
+                  message: hello
+                received_at: "2025-05-02T12:34:56Z"
+
+  /time:
+    get:
+      summary: Return current server time
+      x-lambda-nickname: time
+      responses:
+        '200':
+          description: Current timestamp
+          content:
+            application/json:
+              example:
+                timestamp: "2025-05-02T12:34:56Z"
