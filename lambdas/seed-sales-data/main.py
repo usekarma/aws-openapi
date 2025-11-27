@@ -453,7 +453,7 @@ def generate_orders(db):
 # ============================================================
 # Lambda handler
 # ============================================================
-def lambda_handler(event, context):
+def handler(event, context):
     print("[seed] Starting seeding process...")
 
     mongo_uri = os.environ.get("MONGO_URI")

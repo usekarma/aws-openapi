@@ -1,2 +1,71 @@
 *.zip
 dist
+
+# -------------------------------------------------------------------
+# Python basics
+# -------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pkl
+*.pdb
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Byte-compiled / optimized files
+*.egg-info/
+*.egg
+*.eggs/
+*.whl
+
+# Setup artifacts
+build/
+dist/
+pip-wheel-metadata/
+
+# IDE / Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs & dumps
+*.log
+*.out
+*.err
+
+# OS
+.DS_Store
+Thumbs.db
+
+# -------------------------------------------------------------------
+# Lambda-specific packaging
+# -------------------------------------------------------------------
+lambda_pkg/
+package/
+*.zip
+
+# Avoid leaking credentials
+.env
+*.secret
+*.key
+*.pem
+
+# Terraform (if used alongside)
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.*
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Serverless Framework (if used)
+.serverless/

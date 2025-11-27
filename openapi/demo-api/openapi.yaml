@@ -50,10 +50,10 @@ paths:
               example:
                 timestamp: "2025-05-02T12:34:56Z"
 
-  /seed:
+  /seed-sales-data:
     get:
       summary: Seed sales data
-      x-lambda-nickname: seed
+      x-lambda-nickname: seed-sales-data
       responses:
         '200':
           description: OK
