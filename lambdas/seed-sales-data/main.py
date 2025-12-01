@@ -1,9 +1,20 @@
 import os
 import json
 import random
-import math
+import logging
 from datetime import datetime, timedelta
+
+import boto3
+from botocore.exceptions import ClientError
 from pymongo import MongoClient, UpdateOne
+
+# ============================================================
+# Logging / AWS clients
+# ============================================================
+log = logging.getLogger()
+log.setLevel(logging.INFO)
+
+ssm = boto3.client("ssm")
 
 # ============================================================
 # Constants (mirroring the Node.js script)
@@ -14,6 +25,10 @@ WEEKEND_BASE_ORDERS = 40
 EXTRA_SYNTHETIC_CUSTOMERS = 200
 
 DB_NAME = "sales"
+
+
+class ConfigError(Exception):
+    pass
 
 
 # ============================================================
@@ -39,6 +54,107 @@ def make_date_in_day(day):
         minutes=rand_int(0, 59),
         seconds=rand_int(0, 59),
     )
+
+
+# ============================================================
+# Source / Mongo resolution (generic)
+# ============================================================
+_SOURCE_RUNTIME_CACHE = None
+_MONGO_CLIENT = None
+_DB = None
+
+
+def load_source_runtime():
+    """
+    Resolve a generic source runtime description from SSM.
+
+    Pattern:
+      - env SRC_NICKNAME (required)
+      - env SRC_TYPE (optional, default "clickhouse")
+      - env IAC_PREFIX (optional, default "/iac")
+      - env SRC_RUNTIME_PARAM (optional override)
+
+    Default SSM path:
+      /<IAC_PREFIX>/<SRC_TYPE>/<SRC_NICKNAME>/runtime
+
+    For clickhouse, we expect the JSON to include either:
+      - "mongo_rs_uri" (preferred), or
+      - "mongo_uri"
+    """
+    global _SOURCE_RUNTIME_CACHE
+    if _SOURCE_RUNTIME_CACHE is not None:
+        return _SOURCE_RUNTIME_CACHE
+
+    src_nickname = os.environ.get("SRC_NICKNAME")
+    if not src_nickname:
+        raise ConfigError("SRC_NICKNAME environment variable is required")
+
+    src_type = os.environ.get("SRC_TYPE", "clickhouse")
+    iac_prefix = os.environ.get("IAC_PREFIX", "/iac")
+
+    param_name = os.environ.get(
+        "SRC_RUNTIME_PARAM",
+        f"{iac_prefix}/{src_type}/{src_nickname}/runtime",
+    )
+
+    log.info("Resolving source runtime from SSM param %s", param_name)
+
+    try:
+        resp = ssm.get_parameter(Name=param_name, WithDecryption=True)
+    except ClientError as e:
+        log.error("Failed to read SSM param %s: %s", param_name, e, exc_info=True)
+        raise ConfigError(f"Unable to load source runtime from {param_name}") from e
+
+    try:
+        value = json.loads(resp["Parameter"]["Value"])
+    except (KeyError, json.JSONDecodeError) as e:
+        log.error("Invalid JSON in SSM param %s: %s", param_name, e, exc_info=True)
+        raise ConfigError(f"Invalid source runtime JSON at {param_name}") from e
+
+    _SOURCE_RUNTIME_CACHE = value
+    return value
+
+
+def get_mongo():
+    """
+    Build and cache a MongoClient + DB.
+
+    Resolution order:
+      1. If MONGO_URI env is set, use it directly.
+      2. Otherwise:
+         - Resolve source runtime via SRC_NICKNAME/SRC_TYPE/IAC_PREFIX
+         - For src_type == "clickhouse", expect mongo_rs_uri or mongo_uri.
+    """
+    global _MONGO_CLIENT, _DB
+    if _MONGO_CLIENT is not None and _DB is not None:
+        return _MONGO_CLIENT, _DB
+
+    mongo_uri = os.environ.get("MONGO_URI")
+    if mongo_uri:
+        log.info("Using MONGO_URI from environment")
+    else:
+        runtime = load_source_runtime()
+        src_type = os.environ.get("SRC_TYPE", "clickhouse")
+
+        if src_type == "clickhouse":
+            mongo_uri = runtime.get("mongo_rs_uri") or runtime.get("mongo_uri")
+            if not mongo_uri:
+                raise ConfigError(
+                    "ClickHouse runtime is missing 'mongo_rs_uri' or 'mongo_uri'"
+                )
+            log.info("Using Mongo URI from ClickHouse runtime")
+        else:
+            raise ConfigError(f"Unsupported SRC_TYPE for Mongo resolution: {src_type}")
+
+    db_name = os.environ.get("DB_NAME", DB_NAME)
+    log.info("Connecting to MongoDB: uri=%s db=%s", mongo_uri, db_name)
+
+    client = MongoClient(mongo_uri)
+    db = client[db_name]
+
+    _MONGO_CLIENT = client
+    _DB = db
+    return client, db
 
 
 # ============================================================
@@ -456,12 +572,22 @@ def generate_orders(db):
 def handler(event, context):
     print("[seed] Starting seeding process...")
 
-    mongo_uri = os.environ.get("MONGO_URI")
-    if not mongo_uri:
-        raise Exception("Missing MONGO_URI environment variable.")
-
-    client = MongoClient(mongo_uri)
-    db = client[DB_NAME]
+    try:
+        _, db = get_mongo()
+    except ConfigError as e:
+        log.error("Configuration error: %s", e)
+        return {
+            "status": "error",
+            "error": "ConfigError",
+            "details": str(e),
+        }
+    except Exception as e:
+        log.error("Unexpected error while initializing Mongo: %s", e, exc_info=True)
+        return {
+            "status": "error",
+            "error": "InitError",
+            "details": "Unexpected error while initializing Mongo",
+        }
 
     ensure_base_customers(db)
     ensure_vendors(db)
